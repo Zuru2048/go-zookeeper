@@ -33,9 +33,9 @@ func parseSeq(path string) (int, error) {
 	return strconv.Atoi(parts[len(parts)-1])
 }
 
-func (l *Lock) Lock() error {
+func (l *Lock) Lock() (error, string) {
 	if l.lockPath != "" {
-		return ErrDeadlock
+		return ErrDeadlock, ""
 	}
 
 	prefix := fmt.Sprintf("%s/lock-", l.path)
@@ -52,28 +52,28 @@ func (l *Lock) Lock() error {
 				pth += "/" + p
 				_, err := l.c.Create(pth, []byte{}, 0, l.acl)
 				if err != nil && err != ErrNodeExists {
-					return err
+					return err, ""
 				}
 			}
 		} else if err == nil {
 			break
 		} else {
-			return err
+			return err, ""
 		}
 	}
 	if err != nil {
-		return err
+		return err, ""
 	}
 
 	seq, err := parseSeq(path)
 	if err != nil {
-		return err
+		return err, ""
 	}
 
 	for {
 		children, _, err := l.c.Children(l.path)
 		if err != nil {
-			return err
+			return err, ""
 		}
 
 		lowestSeq := seq
@@ -82,7 +82,7 @@ func (l *Lock) Lock() error {
 		for _, p := range children {
 			s, err := parseSeq(p)
 			if err != nil {
-				return err
+				return err, ""
 			}
 			if s < lowestSeq {
 				lowestSeq = s
@@ -101,7 +101,7 @@ func (l *Lock) Lock() error {
 		// Wait on the node next in line for the lock
 		_, _, ch, err := l.c.GetW(l.path + "/" + prevSeqPath)
 		if err != nil && err != ErrNoNode {
-			return err
+			return err, ""
 		} else if err != nil && err == ErrNoNode {
 			// try again
 			continue
@@ -109,23 +109,24 @@ func (l *Lock) Lock() error {
 
 		ev := <-ch
 		if ev.Err != nil {
-			return ev.Err
+			return err, ""
 		}
 	}
 
 	l.seq = seq
 	l.lockPath = path
-	return nil
+	return nil, path
 }
 
-func (l *Lock) Unlock() error {
+func (l *Lock) Unlock() (error, string) {
 	if l.lockPath == "" {
-		return ErrNotLocked
+		return ErrNotLocked, ""
 	}
 	if err := l.c.Delete(l.lockPath, -1); err != nil {
-		return err
+		return err, ""
 	}
+	tmp := l.lockPath
 	l.lockPath = ""
 	l.seq = 0
-	return nil
+	return nil, tmp
 }
